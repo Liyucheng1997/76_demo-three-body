@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>三体系统模拟器 · Three-Body Simulator</title>
+<style>
+  :root {
+    --bg: #05060a;
+    --panel: rgba(12, 16, 28, 0.82);
+    --border: rgba(120, 160, 220, 0.18);
+    --text: #c9d6ee;
+    --muted: #7a86a0;
+    --accent: #6fb3ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--text);
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* 面板通用 */
+  .panel {
+    position: absolute;
+    background: var(--panel);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+
+  /* 左上：说明 */
+  #info {
+    top: 16px; left: 16px;
+    max-width: 320px;
+  }
+  #info h1 {
+    font-size: 17px; font-weight: 600;
+    background: linear-gradient(90deg, #ff8a5b, #ffd86f, #6fb3ff);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+  }
+  #info p { color: var(--muted); font-size: 12px; }
+  #info .hint { margin-top: 8px; font-size: 11px; color: #586079; }
+
+  /* 右上：实时状态 */
+  #status { top: 16px; right: 16px; width: 250px; }
+  #status .row { display: flex; justify-content: space-between; align-items: baseline; }
+  #status .label { color: var(--muted); font-size: 12px; }
+  #status .val { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  .era-badge {
+    display: inline-block;
+    padding: 3px 12px; border-radius: 20px;
+    font-weight: 700; font-size: 14px;
+    letter-spacing: 1px;
+    transition: all .4s ease;
+  }
+  .era-stable { background: rgba(90, 200, 120, 0.18); color: #7fe6a0; border: 1px solid rgba(90,200,120,.4); }
+  .era-chaos  { background: rgba(240, 90, 90, 0.16); color: #ff8a7a; border: 1px solid rgba(240,90,90,.4); }
+
+  .tempbar {
+    height: 8px; border-radius: 6px; margin-top: 6px;
+    background: linear-gradient(90deg, #2b6cff 0%, #36c5d6 25%, #6fe49a 45%, #ffd86f 65%, #ff8a3c 82%, #ff3b3b 100%);
+    position: relative;
+  }
+  .tempbar .marker {
+    position: absolute; top: -3px; width: 3px; height: 14px;
+    background: #fff; border-radius: 2px; box-shadow: 0 0 6px #fff;
+    transform: translateX(-50%);
+  }
+  .phenom { margin-top: 8px; font-size: 12px; color: #ffd86f; min-height: 18px; }
+
+  /* 底部控制条 */
+  #controls {
+    bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    justify-content: center;
+  }
+  #controls button {
+    background: rgba(40,52,80,0.7); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 13px; font-size: 12px; cursor: pointer;
+    transition: background .2s, border-color .2s;
+  }
+  #controls button:hover { background: rgba(70,100,160,0.6); border-color: var(--accent); }
+  #controls button.active { background: rgba(80,130,220,0.5); border-color: var(--accent); }
+  #controls .sep { width: 1px; height: 22px; background: var(--border); }
+  #controls .speed { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  #controls input[type=range] { width: 110px; accent-color: var(--accent); }
+
+  .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; }
+  .legend .item { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  @media (max-width: 640px) {
+    #info { max-width: 220px; }
+    #status { width: 200px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="info" class="panel">
+  <h1>三体系统模拟器</h1>
+  <p>三颗恒星在彼此引力下做混沌运动——它们的轨道无法被解析求解，对初始条件极其敏感。一颗行星（三体星）夹在其中，承受着永不重复的环境剧变。</p>
+  <div class="legend">
+    <span class="item"><span class="dot" style="background:#ff7043"></span>恒星 A</span>
+    <span class="item"><span class="dot" style="background:#ffd54f"></span>恒星 B</span>
+    <span class="item"><span class="dot" style="background:#64b5f6"></span>恒星 C</span>
+    <span class="item"><span class="dot" style="background:#9ccc65"></span>行星</span>
+  </div>
+  <p class="hint">拖拽旋转 · 滚轮缩放 · 右键平移</p>
+</div>
+
+<div id="status" class="panel">
+  <div class="row">
+    <span class="label">当前纪元</span>
+    <span id="era" class="era-badge era-chaos">乱纪元</span>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <span class="label">行星表面温度</span>
+    <span class="val" id="temp">—</span>
+  </div>
+  <div class="tempbar"><div class="marker" id="tempMarker" style="left:50%"></div></div>
+  <div class="phenom" id="phenom">观测中……</div>
+  <div class="row" style="margin-top:10px">
+    <span class="label">模拟时间</span>
+    <span class="val" id="simTime">0</span>
+  </div>
+  <div class="row">
+    <span class="label">连续恒纪元</span>
+    <span class="val" id="stableDur">0</span>
+  </div>
+  <div class="row">
+    <span class="label">系统状态</span>
+    <span class="val" id="sysState">束缚</span>
+  </div>
+</div>
+
+<div id="controls" class="panel">
+  <button id="btnPause">⏸ 暂停</button>
+  <button id="btnReset">🎲 随机重置</button>
+  <div class="sep"></div>
+  <button id="btnTrails" class="active">轨迹</button>
+  <button id="btnFollow">跟随行星</button>
+  <div class="sep"></div>
+  <div class="speed">速度 <input type="range" id="speed" min="0.1" max="4" step="0.1" value="1"><span id="speedVal">1.0×</span></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ============================================================
+//  物理引擎 —— N 体引力（带软化），速度 Verlet 积分
+// ============================================================
+const G = 1.0;            // 引力常数（模拟单位）
+const SOFT = 0.6;         // 软化长度，避免近距离奇点
+const SUBSTEPS = 8;       // 每帧物理子步，保证混沌系统稳定
+const BASE_DT = 0.012;    // 单个子步时间
+
+// 天体：三颗恒星 + 一颗行星
+// 恒星质量较大且彼此相近；行星质量极小（几乎不影响恒星，但被剧烈牵引）
+const STAR_COLORS = [0xff7043, 0xffd54f, 0x64b5f6];
+const STAR_LIGHT = [
+  new THREE.Color(0xffb08a),
+  new THREE.Color(0xfff0b0),
+  new THREE.Color(0xa9d4ff)
+];
+
+let bodies = [];   // {mass, pos:Vector3, vel:Vector3, isStar, lum}
+
+function randomInitialConditions() {
+  // 三颗恒星：质量略有差异，初始位置散布在一个紧凑区域内
+  const stars = [];
+  const masses = [
+    1.4 + Math.random() * 0.6,
+    1.1 + Math.random() * 0.6,
+    0.9 + Math.random() * 0.6
+  ];
+  for (let i = 0; i < 3; i++) {
+    const ang = (i / 3) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+    const r = 4 + Math.random() * 2.5;               // 更紧凑，避免一开始就太松散
+    const pos = new THREE.Vector3(
+      Math.cos(ang) * r,
+      (Math.random() - 0.5) * 2.2,
+      Math.sin(ang) * r
+    );
+    // 给一个大致绕系统旋转的切向速度 + 小扰动（方向，幅度稍后统一标定）
+    const tang = new THREE.Vector3(-Math.sin(ang), 0, Math.cos(ang));
+    const vel = tang.add(new THREE.Vector3(
+      (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5));
+    stars.push({ mass: masses[i], pos, vel, isStar: true, lum: masses[i] * 1.3, idx: i });
+  }
+
+  // ---- 关键：用位力定理把速度标定到“束缚态” ----
+  // 先把三星的质心系动量清零，再按能量预算缩放速度，保证总能量为负。
+  zeroMomentum(stars);
+  const PE = potentialEnergy(stars);       // 负值
+  const KE = kineticEnergy(stars);
+  // 目标位力比 Q = 2*KE/|PE|，取 0.4~0.55 之间：
+  //   < 1 即束缚；偏小→系统先收缩再绕转，混沌但不逃逸。
+  const Q = 0.4 + Math.random() * 0.15;
+  const KEtarget = Q * Math.abs(PE) / 2;
+  const scale = Math.sqrt(KEtarget / KE);
+  stars.forEach(s => s.vel.multiplyScalar(scale));
+
+  // ---- 行星：放在系统外围，给接近圆轨道的速度，使其也大体被束缚 ----
+  let Mstar = 0; const com = new THREE.Vector3();
+  stars.forEach(s => { Mstar += s.mass; com.addScaledVector(s.pos, s.mass); });
+  com.divideScalar(Mstar);
+  const pang = Math.random() * Math.PI * 2;
+  const pr = 9 + Math.random() * 3;
+  const ppos = new THREE.Vector3(com.x + Math.cos(pang)*pr, (Math.random()-0.5)*1.5, com.z + Math.sin(pang)*pr);
+  const ptang = new THREE.Vector3(-Math.sin(pang), 0, Math.cos(pang));
+  // 以三星总质量当成中心天体估算圆轨道速度，再打个折让轨道偏椭圆、更有戏剧性
+  const vcirc = Math.sqrt(G * Mstar / pr);
+  const pvel = ptang.multiplyScalar(vcirc * (0.7 + Math.random()*0.25));
+  const planet = { mass: 0.0008, pos: ppos, vel: pvel, isStar: false, lum: 0 };
+
+  // 整体消除质心漂移（含行星），让系统停在画面中心
+  const all = [...stars, planet];
+  zeroMomentum(all);
+  let M = 0; const c2 = new THREE.Vector3();
+  all.forEach(b => { M += b.mass; c2.addScaledVector(b.pos, b.mass); });
+  c2.divideScalar(M);
+  all.forEach(b => b.pos.sub(c2));
+
+  return all;
+}
+
+// —— 能量与动量工具 ——
+function potentialEnergy(set) {
+  let PE = 0;
+  for (let i = 0; i < set.length; i++)
+    for (let j = i+1; j < set.length; j++) {
+      const r = Math.sqrt(set[i].pos.distanceToSquared(set[j].pos) + SOFT*SOFT);
+      PE -= G * set[i].mass * set[j].mass / r;
+    }
+  return PE;
+}
+function kineticEnergy(set) {
+  let KE = 0;
+  set.forEach(b => KE += 0.5 * b.mass * b.vel.lengthSq());
+  return KE;
+}
+function zeroMomentum(set) {
+  let M = 0; const mom = new THREE.Vector3();
+  set.forEach(b => { M += b.mass; mom.addScaledVector(b.vel, b.mass); });
+  mom.divideScalar(M);
+  set.forEach(b => b.vel.sub(mom));
+}
+
+// 计算每个天体受到的加速度
+const _accel = [];
+function computeAccelerations() {
+  for (let i = 0; i < bodies.length; i++) {
+    if (!_accel[i]) _accel[i] = new THREE.Vector3();
+    _accel[i].set(0, 0, 0);
+  }
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const dx = bodies[j].pos.x - bodies[i].pos.x;
+      const dy = bodies[j].pos.y - bodies[i].pos.y;
+      const dz = bodies[j].pos.z - bodies[i].pos.z;
+      const r2 = dx*dx + dy*dy + dz*dz + SOFT*SOFT;
+      const invr = 1 / Math.sqrt(r2);
+      const invr3 = invr / r2;
+      const f = G * invr3;
+      _accel[i].x += f * bodies[j].mass * dx;
+      _accel[i].y += f * bodies[j].mass * dy;
+      _accel[i].z += f * bodies[j].mass * dz;
+      _accel[j].x -= f * bodies[i].mass * dx;
+      _accel[j].y -= f * bodies[i].mass * dy;
+      _accel[j].z -= f * bodies[i].mass * dz;
+    }
+  }
+  return _accel;
+}
+
+let prevAccel = null;
+function stepVerlet(dt) {
+  if (!prevAccel) prevAccel = computeAccelerations().map(a => a.clone());
+  // x += v*dt + 0.5*a*dt^2
+  for (let i = 0; i < bodies.length; i++) {
+    const a = prevAccel[i];
+    bodies[i].pos.x += bodies[i].vel.x * dt + 0.5 * a.x * dt * dt;
+    bodies[i].pos.y += bodies[i].vel.y * dt + 0.5 * a.y * dt * dt;
+    bodies[i].pos.z += bodies[i].vel.z * dt + 0.5 * a.z * dt * dt;
+  }
+  const newAccel = computeAccelerations();
+  for (let i = 0; i < bodies.length; i++) {
+    bodies[i].vel.x += 0.5 * (prevAccel[i].x + newAccel[i].x) * dt;
+    bodies[i].vel.y += 0.5 * (prevAccel[i].y + newAccel[i].y) * dt;
+    bodies[i].vel.z += 0.5 * (prevAccel[i].z + newAccel[i].z) * dt;
+    prevAccel[i].copy(newAccel[i]);
+  }
+}
+
+// ============================================================
+//  Three.js 场景
+// ============================================================
+const app = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05060a, 0.004);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 2000);
+camera.position.set(0, 22, 38);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+app.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// 背景星空
+function makeStarfield() {
+  const N = 2500;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = 300 + Math.random() * 600;
+    const th = Math.acos(2 * Math.random() - 1);
+    const ph = Math.random() * Math.PI * 2;
+    pos[i*3]   = r * Math.sin(th) * Math.cos(ph);
+    pos[i*3+1] = r * Math.cos(th);
+    pos[i*3+2] = r * Math.sin(th) * Math.sin(ph);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, sizeAttenuation: false, transparent: true, opacity: 0.7 });
+  return new THREE.Points(geo, mat);
+}
+scene.add(makeStarfield());
+scene.add(new THREE.AmbientLight(0x223044, 0.6));
+
+// 发光精灵贴图（程序生成径向渐变）
+function glowTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.6)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); return t;
+}
+const GLOW = glowTexture();
+
+// 天体可视化对象
+let starMeshes = [], starGlows = [], starLights = [], planetMesh = null;
+let trails = [];   // 每个天体一条轨迹线
+
+const TRAIL_LEN = 600;
+
+function buildVisuals() {
+  // 清理旧的
+  [...starMeshes, ...starGlows, planetMesh].forEach(o => o && scene.remove(o));
+  starLights.forEach(l => scene.remove(l));
+  trails.forEach(t => scene.remove(t.line));
+  starMeshes = []; starGlows = []; starLights = []; trails = [];
+
+  bodies.forEach((b, i) => {
+    if (b.isStar) {
+      const radius = 0.7 + b.mass * 0.45;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 32, 32),
+        new THREE.MeshBasicMaterial({ color: STAR_COLORS[b.idx] })
+      );
+      scene.add(mesh); starMeshes.push(mesh);
+
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: GLOW, color: STAR_COLORS[b.idx], transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      }));
+      glow.scale.setScalar(radius * 7);
+      scene.add(glow); starGlows.push(glow);
+
+      const light = new THREE.PointLight(STAR_LIGHT[b.idx], b.lum * 3, 0, 1.6);
+      scene.add(light); starLights.push(light);
+    } else {
+      planetMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.35, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0x9ccc65, roughness: 0.85, metalness: 0.05,
+          emissive: 0x000000 })
+      );
+      scene.add(planetMesh);
+    }
+
+    // 轨迹
+    const tgeo = new THREE.BufferGeometry();
+    const tpos = new Float32Array(TRAIL_LEN * 3);
+    tgeo.setAttribute('position', new THREE.BufferAttribute(tpos, 3));
+    tgeo.setDrawRange(0, 0);
+    const color = b.isStar ? STAR_COLORS[b.idx] : 0x9ccc65;
+    const tmat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending });
+    const line = new THREE.Line(tgeo, tmat);
+    line.frustumCulled = false;
+    scene.add(line);
+    trails.push({ line, positions: tpos, count: 0, head: 0 });
+  });
+}
+
+function pushTrail(i, p) {
+  const t = trails[i];
+  const arr = t.positions;
+  // 滚动缓冲：简单做法 —— 平移
+  if (t.count < TRAIL_LEN) {
+    arr[t.count*3] = p.x; arr[t.count*3+1] = p.y; arr[t.count*3+2] = p.z;
+    t.count++;
+    t.line.geometry.setDrawRange(0, t.count);
+  } else {
+    // 整体左移一格再写入末尾（数据量小，可接受）
+    arr.copyWithin(0, 3);
+    arr[(TRAIL_LEN-1)*3] = p.x; arr[(TRAIL_LEN-1)*3+1] = p.y; arr[(TRAIL_LEN-1)*3+2] = p.z;
+  }
+  t.line.geometry.attributes.position.needsUpdate = true;
+}
+
+// ============================================================
+//  行星环境 / 纪元判定（致敬《三体》游戏设定）
+// ============================================================
+// 行星接收的总辐射通量  F = Σ Lum_i / dist_i^2
+// 表面温度近似  T ∝ F^(1/4)，再映射到摄氏度区间用于显示。
+const LIVABLE_LOW = -10, LIVABLE_HIGH = 50;   // 适居温度带（℃）
+let tempHistory = [];        // 近期温度，用于判定纪元稳定性
+let stableTimer = 0;         // 连续处于恒纪元的模拟时间
+let currentEra = 'chaos';
+
+function fluxToTemp(F) {
+  // 标定：使典型单星距离给出温和温度
+  const T = Math.pow(F, 0.25) * 95 - 60;
+  return T;
+}
+
+function evaluateEnvironment() {
+  const planet = bodies.find(b => !b.isStar);
+  const stars = bodies.filter(b => b.isStar);
+  let F = 0;
+  const dists = [];
+  stars.forEach(s => {
+    const d = planet.pos.distanceTo(s.pos);
+    dists.push(d);
+    F += s.lum / (d * d + 0.5);
+  });
+  const temp = fluxToTemp(F);
+
+  // 维护温度历史（约最近 6 个模拟时间单位）
+  tempHistory.push(temp);
+  if (tempHistory.length > 120) tempHistory.shift();
+
+  // 稳定性：近期温度波动小，且落在适居带 → 恒纪元
+  const recent = tempHistory.slice(-60);
+  const mean = recent.reduce((a,b)=>a+b,0) / recent.length;
+  let variance = 0; recent.forEach(t => variance += (t-mean)*(t-mean));
+  variance /= recent.length;
+  const std = Math.sqrt(variance);
+
+  const livable = temp > LIVABLE_LOW && temp < LIVABLE_HIGH;
+  const calm = std < 8;
+  const isStable = livable && calm && recent.length >= 30;
+
+  // 现象判定（飞星 / 三日凌空 / 严寒长夜 等）
+  const sorted = [...dists].sort((a,b)=>a-b);
+  let phenom = '';
+  const near = sorted[0];
+  if (temp > 120) phenom = '☀☀☀ 三日凌空 —— 烈焰焚烧，生命脱水';
+  else if (temp > 70) phenom = '☀☀ 双日临空 —— 酷热难当';
+  else if (temp < -60) phenom = '❄ 严寒长夜 —— 万物冰封';
+  else if (temp < -20) phenom = '🌑 漫漫长夜 —— 寒冷降临';
+  else if (sorted[0] > 16 && sorted[1] > 16 && sorted[2] > 16) phenom = '✦ 飞星不动 —— 三日皆远，深寒将至';
+  else if (isStable) phenom = '✓ 气候温和 —— 文明可脱水复苏、繁衍生息';
+  else phenom = '~ 气候动荡 —— 冷热无常';
+
+  return { temp, dists, isStable, std, phenom };
+}
+
+// ============================================================
+//  系统状态：检测某颗恒星是否被甩出（解除束缚）
+// ============================================================
+function systemBound() {
+  const stars = bodies.filter(b => b.isStar);
+  const com = new THREE.Vector3();
+  let M = 0;
+  stars.forEach(s => { com.addScaledVector(s.pos, s.mass); M += s.mass; });
+  com.divideScalar(M);
+  let maxd = 0;
+  stars.forEach(s => { maxd = Math.max(maxd, s.pos.distanceTo(com)); });
+  return maxd < 60;
+}
+
+// ============================================================
+//  UI 绑定
+// ============================================================
+const ui = {
+  era: document.getElementById('era'),
+  temp: document.getElementById('temp'),
+  tempMarker: document.getElementById('tempMarker'),
+  phenom: document.getElementById('phenom'),
+  simTime: document.getElementById('simTime'),
+  stableDur: document.getElementById('stableDur'),
+  sysState: document.getElementById('sysState'),
+  speedVal: document.getElementById('speedVal'),
+};
+
+let paused = false, showTrails = true, followPlanet = false, speed = 1;
+let simTime = 0;
+
+document.getElementById('btnPause').onclick = (e) => {
+  paused = !paused;
+  e.target.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+};
+document.getElementById('btnReset').onclick = () => resetSim();
+document.getElementById('btnTrails').onclick = (e) => {
+  showTrails = !showTrails;
+  e.target.classList.toggle('active', showTrails);
+  trails.forEach(t => t.line.visible = showTrails);
+};
+document.getElementById('btnFollow').onclick = (e) => {
+  followPlanet = !followPlanet;
+  e.target.classList.toggle('active', followPlanet);
+};
+const speedSlider = document.getElementById('speed');
+speedSlider.oninput = () => { speed = parseFloat(speedSlider.value); ui.speedVal.textContent = speed.toFixed(1) + '×'; };
+
+function resetSim() {
+  bodies = randomInitialConditions();
+  prevAccel = null;
+  tempHistory = []; stableTimer = 0; simTime = 0; currentEra = 'chaos';
+  buildVisuals();
+}
+
+// 温度 → 行星表面颜色
+const _col = new THREE.Color();
+function planetColorForTemp(temp) {
+  if (temp < -20) _col.setHSL(0.58, 0.5, 0.62);        // 冰蓝
+  else if (temp < 15) _col.setHSL(0.33, 0.45, 0.5);     // 绿（适居）
+  else if (temp < 55) _col.setHSL(0.12, 0.6, 0.5);      // 黄褐
+  else _col.setHSL(0.02, 0.75, 0.5);                    // 灼红
+  return _col;
+}
+
+// ============================================================
+//  主循环
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (!paused) {
+    const dt = BASE_DT * speed;
+    for (let s = 0; s < SUBSTEPS; s++) stepVerlet(dt);
+    simTime += dt * SUBSTEPS;
+  }
+
+  // 更新可视化位置
+  let si = 0;
+  bodies.forEach((b, i) => {
+    if (b.isStar) {
+      starMeshes[si].position.copy(b.pos);
+      starGlows[si].position.copy(b.pos);
+      starLights[si].position.copy(b.pos);
+      si++;
+    } else if (planetMesh) {
+      planetMesh.position.copy(b.pos);
+    }
+    if (!paused && showTrails) pushTrail(i, b.pos);
+  });
+
+  // 环境与纪元
+  const env = evaluateEnvironment();
+  if (!paused) {
+    if (env.isStable) { stableTimer += BASE_DT * SUBSTEPS * speed; }
+    else stableTimer = 0;
+  }
+  const era = env.isStable ? 'stable' : 'chaos';
+  if (era !== currentEra) {
+    currentEra = era;
+    ui.era.textContent = era === 'stable' ? '恒纪元' : '乱纪元';
+    ui.era.className = 'era-badge ' + (era === 'stable' ? 'era-stable' : 'era-chaos');
+  }
+  ui.temp.textContent = env.temp.toFixed(1) + ' ℃';
+  // 温度条标记：-100℃ → 0%，200℃ → 100%
+  const pct = Math.max(0, Math.min(100, (env.temp + 100) / 300 * 100));
+  ui.tempMarker.style.left = pct + '%';
+  ui.phenom.textContent = env.phenom;
+  ui.simTime.textContent = simTime.toFixed(1);
+  ui.stableDur.textContent = stableTimer.toFixed(1);
+
+  const bound = systemBound();
+  ui.sysState.textContent = bound ? '束缚' : '⚠ 恒星逃逸';
+  ui.sysState.style.color = bound ? '' : '#ff8a7a';
+
+  // 行星颜色随温度
+  if (planetMesh) {
+    planetMesh.material.color.copy(planetColorForTemp(env.temp));
+    const heat = Math.max(0, (env.temp - 60) / 140);
+    planetMesh.material.emissive.setRGB(heat * 0.8, heat * 0.2, 0);
+  }
+
+  // 跟随行星
+  if (followPlanet && planetMesh) {
+    controls.target.lerp(planetMesh.position, 0.1);
+  } else {
+    controls.target.lerp(new THREE.Vector3(0,0,0), 0.02);
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// 启动
+resetSim();
+animate();
+</script>
+</body>
+</html>
