@@ -8,3 +8,6 @@ Thumbs.db
 # Node (如将来引入构建工具)
 node_modules/
 dist/
+
+# 本地工具配置
+.claude/
